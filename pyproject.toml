@@ -1,0 +1,17 @@
+[project]
+name = "force-insertion-policy"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "h5py",
+    "pyyaml",
+    "torch",
+]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["shared*", "diffusion*", "cvae*", "scripts*"]
