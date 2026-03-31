@@ -13,20 +13,27 @@ def compute_normalization_stats(data_dir: str, success_only: bool = True) -> dic
     obs_accum = []
     action_accum = []
 
+    skipped = 0
     for entry in index:
         if success_only and not entry["success"]:
             continue
 
         filepath = data_dir / entry["path"]
-        with h5py.File(filepath, "r") as ep:
-            f_ext = ep["obs/f_ext"][:]
-            f_internal = ep["obs/f_internal"][:]
-            ee_vel = ep["obs/ee_velocity"][:]
-            obs = np.concatenate([f_ext, f_internal, ee_vel], axis=1)  # (T, 18)
-            action = ep["action/Fff"][:]  # (T, 6)
+        try:
+            with h5py.File(filepath, "r") as ep:
+                f_ext = ep["obs/f_ext"][:]
+                f_internal = ep["obs/f_internal"][:]
+                ee_vel = ep["obs/ee_velocity"][:]
+                obs = np.concatenate([f_ext, f_internal, ee_vel], axis=1)  # (T, 18)
+                action = ep["action/Fff"][:]  # (T, 6)
+                obs_accum.append(obs)
+                action_accum.append(action)
+        except OSError as e:
+            print(f"WARNING: Skipping corrupt file {filepath}: {e}")
+            skipped += 1
 
-            obs_accum.append(obs)
-            action_accum.append(action)
+    if skipped:
+        print(f"WARNING: Skipped {skipped} corrupt episodes out of {len(index)} total.")
 
     all_obs = np.concatenate(obs_accum, axis=0)
     all_actions = np.concatenate(action_accum, axis=0)

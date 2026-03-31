@@ -6,7 +6,6 @@ dependencies = [
     "numpy",
     "h5py",
     "pyyaml",
-    "torch",
 ]
 
 [build-system]
@@ -15,3 +14,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["shared*", "diffusion*", "cvae*", "scripts*"]
+
+[project.optional-dependencies]
+dev = [
+    "notebook",
+]
