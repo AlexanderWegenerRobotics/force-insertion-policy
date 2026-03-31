@@ -1,6 +1,7 @@
 import torch
 import yaml
 import argparse
+import json
 from pathlib import Path
 from torch.utils.data import DataLoader
 
@@ -33,6 +34,8 @@ def train(cfg):
     save_dir.mkdir(exist_ok=True)
     val_every = cfg.get("val_every", 5)
 
+    history = {"train_loss": [], "val_loss": [], "val_epochs": []}
+
     for epoch in range(1, epochs + 1):
         model.train()
         total_loss = 0
@@ -53,6 +56,7 @@ def train(cfg):
             n_batches += 1
 
         train_loss = total_loss / n_batches
+        history["train_loss"].append(train_loss)
 
         if epoch % val_every == 0:
             model.eval()
@@ -68,6 +72,9 @@ def train(cfg):
                     val_batches += 1
 
             val_loss = val_total / val_batches
+            history["val_loss"].append(val_loss)
+            history["val_epochs"].append(epoch)
+
             improved = ""
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -75,6 +82,9 @@ def train(cfg):
                 improved = " *"
 
             print(f"Epoch {epoch:4d} | train: {train_loss:.4f} | val: {val_loss:.4f}{improved}")
+
+            with open(save_dir / "history.json", "w") as f:
+                json.dump(history, f)
         else:
             print(f"Epoch {epoch:4d} | train: {train_loss:.4f}")
 
