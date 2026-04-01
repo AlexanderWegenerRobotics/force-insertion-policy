@@ -1,6 +1,7 @@
 # Copy to data_config.yaml and set your local path (data_config.yaml is .gitignored)
 
-data_dir: /path/to/your/local/insertion-data/v1  # folder containing HDF5 episodes + dataset_index.yaml
+data_dir: /path/to/your/local/insertion-data/v1   # folder containing HDF5 episodes + dataset_index.yaml
+norm_stats: configs/normalization_stats.yaml      # cofig file with normalization parameter. if not existing, run scripts/compute_normalization.py
 success_only: true                                # filter to successful episodes only
 val_ratio: 0.2                                    # fraction of episodes held out for validation
 val_seed: 42                                      # deterministic split across all machines
