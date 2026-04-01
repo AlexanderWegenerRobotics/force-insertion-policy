@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 
 
 class InsertionDataset(Dataset):
-    def __init__(self, cfg, split="train"):
+    def __init__(self, cfg, split="train", keep_episodes=False):
         data_dir = Path(cfg["data_dir"])
         with open(data_dir / "dataset_index.yaml", "r") as f:
             index = yaml.safe_load(f)
@@ -29,11 +29,10 @@ class InsertionDataset(Dataset):
         self.act_mean = np.array(stats["action_mean"], dtype=np.float32)
         self.act_std = np.array(stats["action_std"], dtype=np.float32) + 1e-6
 
-        self.observations = []
-        self.actions = []
-        self.timestep_index = []
+        observations = []
+        actions = []
 
-        for i, idx in enumerate(indices):
+        for idx in indices:
             entry = successful[idx]
             with h5py.File(data_dir / entry["path"], "r") as f:
                 obs = np.concatenate([f["obs/f_ext"][:], f["obs/f_internal"][:], f["obs/ee_velocity"][:]], axis=1).astype(np.float32)
@@ -42,25 +41,38 @@ class InsertionDataset(Dataset):
             obs = (obs - self.obs_mean) / self.obs_std
             act = (act - self.act_mean) / self.act_std
 
-            self.observations.append(obs)
-            self.actions.append(act)
-            for t in range(len(obs)):
-                self.timestep_index.append((i, t))
+            observations.append(obs)
+            actions.append(act)
+
+        all_obs = np.concatenate(observations, axis=0)
+        all_actions = np.concatenate(actions, axis=0)
+
+        all_prev = np.zeros_like(all_obs)
+        offset = 0
+        for obs in observations:
+            length = len(obs)
+            all_prev[offset] = obs[0]
+            all_prev[offset + 1:offset + length] = obs[:length - 1]
+            offset += length
+
+        self.obs_curr = torch.from_numpy(all_obs)
+        self.obs_prev = torch.from_numpy(all_prev)
+        self.act = torch.from_numpy(all_actions)
+
+        if keep_episodes:
+            self.observations = observations
+            self.actions = actions
 
     def __len__(self):
-        return len(self.timestep_index)
+        return len(self.obs_curr)
 
     def __getitem__(self, idx):
-        ep_idx, t = self.timestep_index[idx]
-        obs = self.observations[ep_idx]
-        o_curr = obs[t]
-        o_prev = obs[t - 1] if t > 0 else o_curr.copy()
-        action = self.actions[ep_idx][t]
-        return torch.from_numpy(o_prev), torch.from_numpy(o_curr), torch.from_numpy(action)
+        return self.obs_prev[idx], self.obs_curr[idx], self.act[idx]
 
     def denormalize_action(self, action):
         return action * self.act_std + self.act_mean
-    
+
+
 if __name__ == "__main__":
     import yaml
 
