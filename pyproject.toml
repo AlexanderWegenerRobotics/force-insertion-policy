@@ -6,6 +6,8 @@ dependencies = [
     "numpy",
     "h5py",
     "pyyaml",
+    "torch",
+    "torchvision",
 ]
 
 [build-system]

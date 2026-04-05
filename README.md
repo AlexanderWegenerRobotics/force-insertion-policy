@@ -11,6 +11,18 @@ Policy training for tight-clearance peg-in-hole insertion using demonstration da
 ```bash
 git clone https://github.com/AlexanderWegenerRobotics/force-insertion-policy.git
 cd force-insertion-policy
+```
+
+#### Option A: Bare metal package install
+```
+pip install -e .
+```
+
+#### Option B: Python venv package install (for BU SCC)
+```
+module load python3/3.10.12 # or another recent python version
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
