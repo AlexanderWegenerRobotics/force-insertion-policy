@@ -10,6 +10,38 @@ from shared.insertion_dataset import InsertionDataset
 from diffusion.ddpm import NoiseEstimator, DDPMSchedule
 
 
+def save_run(save_dir, model, cfg, history, n_params, suffix=""):
+    save_dir = Path(save_dir)
+
+    with open(save_dir / "config.json", "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    with open(save_dir / "history.json", "w") as f:
+        json.dump(history, f, indent=2)
+
+    arch = {
+        "class": model.__class__.__name__,
+        "str": str(model),
+        "n_params": n_params,
+        "obs_dim": cfg.get("obs_dim", 18),
+        "action_dim": cfg.get("action_dim", 6),
+        "hidden_dim": cfg.get("hidden_dim", 512),
+        "timestep_embed_dim": cfg.get("timestep_embed_dim", 128),
+        "diffusion_horizon": cfg.get("diffusion_horizon", 50),
+        "noise_schedule": {
+            "type": "linear",
+            "beta_start": cfg.get("beta_start", 1e-4),
+            "beta_end": cfg.get("beta_end", 1e-2),
+            "T": cfg.get("diffusion_horizon", 50),
+        },
+    }
+    with open(save_dir / "architecture.json", "w") as f:
+        json.dump(arch, f, indent=2)
+
+    if suffix:
+        torch.save(model.state_dict(), save_dir / f"{suffix}.pt")
+
+
 def train(cfg):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -43,22 +75,25 @@ def train(cfg):
     best_val_loss = float("inf")
     save_dir = Path(cfg.get("save_dir", "checkpoints"))
     save_dir.mkdir(exist_ok=True, parents=True)
-    with open(save_dir / "config.json", "w") as f:
-        json.dump(cfg, f, indent=2)
     val_every = cfg.get("val_every", 5)
 
-    history = {"train_loss": [], "val_loss": [], "val_epochs": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "val_epochs": [],
+        "best_val_loss": None,
+        "final_train_loss": None,
+        "n_params": n_params,
+        "hidden_dim": cfg.get("hidden_dim", 512),
+    }
     epoch = 0
 
     def handle_interrupt(signum, frame):
         print(f"\nInterrupted at epoch {epoch}. Saving checkpoint...")
-        torch.save(model.state_dict(), save_dir / "interrupted.pt")
         history["best_val_loss"] = best_val_loss
         history["final_train_loss"] = history["train_loss"][-1] if history["train_loss"] else None
-        history["n_params"] = n_params
-        history["hidden_dim"] = cfg.get("hidden_dim", 512)
-        with open(save_dir / "history.json", "w") as f:
-            json.dump(history, f)
+        history["interrupted_epoch"] = epoch
+        save_run(save_dir, model, cfg, history, n_params, suffix="interrupted")
         print(f"Saved to {save_dir}. Best val loss: {best_val_loss:.4f}")
         exit(0)
 
@@ -122,6 +157,8 @@ def train(cfg):
             val_loss = val_total / val_batches
             history["val_loss"].append(val_loss)
             history["val_epochs"].append(epoch)
+            history["best_val_loss"] = best_val_loss
+            history["final_train_loss"] = train_loss
 
             improved = ""
             if val_loss < best_val_loss:
@@ -129,17 +166,16 @@ def train(cfg):
                 torch.save(model.state_dict(), save_dir / "best.pt")
                 improved = " *"
 
+            save_run(save_dir, model, cfg, history, n_params)
+
             print(f"Epoch {epoch:4d} | {time.time() - epoch_time:.2f}s | train: {train_loss:.4f} | val: {val_loss:.4f}{improved}")
-            history["best_val_loss"] = best_val_loss
-            history["final_train_loss"] = history["train_loss"][-1]
-            history["n_params"] = n_params
-            history["hidden_dim"] = cfg.get("hidden_dim", 512)
-            with open(save_dir / "history.json", "w") as f:
-                json.dump(history, f)
         else:
             print(f"Epoch {epoch:4d} | {time.time() - epoch_time:.1f}s | train: {train_loss:.4f}")
 
+    history["best_val_loss"] = best_val_loss
+    history["final_train_loss"] = history["train_loss"][-1]
     torch.save(model.state_dict(), save_dir / "final.pt")
+    save_run(save_dir, model, cfg, history, n_params)
     print(f"Done. Best val loss: {best_val_loss:.4f}")
 
 

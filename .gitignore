@@ -7,6 +7,8 @@ build/
 *.egg
 .ipynb_checkpoints/
 dataset/
+literature/
+archive/
 
 # Virtual environments
 .venv/
