@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 class InsertionDataset(Dataset):
     def __init__(self, cfg, split="train", keep_episodes=False):
         data_dir = Path(cfg["data_dir"])
-        with open(data_dir / "dataset_index.yaml", "r") as f:
+        with open(data_dir / "dataset_index.yaml", "r", encoding="utf-8") as f:
             index = yaml.safe_load(f)
 
         successful = [e for e in index if e["success"]]
@@ -22,7 +22,7 @@ class InsertionDataset(Dataset):
         else:
             indices = perm[:n_val]
 
-        with open(cfg["norm_stats"], "r") as f:
+        with open(cfg["norm_stats"], "r", encoding="utf-8") as f:
             stats = yaml.safe_load(f)
         self.obs_mean = np.array(stats["obs_mean"], dtype=np.float32)
         self.obs_std = np.array(stats["obs_std"], dtype=np.float32) + 1e-6
@@ -76,7 +76,7 @@ class InsertionDataset(Dataset):
 if __name__ == "__main__":
     import yaml
 
-    with open("configs/data_config.yaml", "r") as f:
+    with open("configs/data_config.yaml", "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     train_ds = InsertionDataset(cfg, split="train")

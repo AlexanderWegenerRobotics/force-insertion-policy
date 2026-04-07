@@ -12,7 +12,7 @@ def main():
     parser.add_argument("--output", default="configs/normalization_stats.yaml")
     args = parser.parse_args()
 
-    with open(args.config, "r") as f:
+    with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     stats = compute_normalization_stats(cfg["data_dir"], cfg.get("success_only", True))
