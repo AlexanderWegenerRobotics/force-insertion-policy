@@ -96,7 +96,7 @@ class NoiseEstimator(nn.Module):
 
 class DDPMSchedule:
     def __init__(self, T=50, beta_start=1e-4, beta_end=1e-2, device="cpu"):
-        """Precompute variance schedule: alpha_t = 1 - beta_t, alpha^bar_t = product_i^T alpha_i, alpha_t = sqrt(beta_t)"""
+        """Precompute variance schedule: alpha_t = 1 - beta_t, alpha^bar_t = product_i^T alpha_i, sigma_t = sqrt(beta_t)"""
         self.T = T
         self.betas = torch.linspace(beta_start, beta_end, T, device=device)
         self.alphas = 1.0 - self.betas
@@ -104,7 +104,7 @@ class DDPMSchedule:
         self.sigmas = torch.sqrt(self.betas)
 
     def q_sample(self, a0, tau, noise=None):
-        """Forward diffusion: alpha_t = sqrt(alpha^bar_t) * a_0 + sqrt(1-alpha^bar_t) * eps  (Eq. 2)"""
+        """Forward diffusion: a_t = sqrt(alpha^bar_t) * a_0 + sqrt(1-alpha^bar_t) * eps  (Eq. 2)"""
         if noise is None:
             noise = torch.randn_like(a0)
         ab = self.alpha_bar[tau]
@@ -113,7 +113,7 @@ class DDPMSchedule:
         return torch.sqrt(ab) * a0 + torch.sqrt(1 - ab) * noise, noise
 
     def p_sample(self, model, o_prev, o_curr, a_tau, tau):
-        """Reverse denoising: a_{t-1} = 1/sqrt(alpha_t) * [a_t - (1-alpha_t)/sqrt(1-alpha^bar_t) * eps] + alpha_t * eps  (Eq. 6)"""
+        """Reverse denoising: a_{t-1} = 1/sqrt(alpha_t) * [a_t - (1-alpha_t)/sqrt(1-alpha^bar_t) * eps] + sigma_t * eps  (Eq. 6)"""
         eps_hat = model(o_prev, o_curr, a_tau, tau)
         alpha = self.alphas[tau]
         alpha_bar = self.alpha_bar[tau]
@@ -134,3 +134,65 @@ class DDPMSchedule:
         self.alpha_bar = self.alpha_bar.to(device)
         self.sigmas = self.sigmas.to(device)
         return self
+
+
+class DDIMSampler:
+    """
+    Deterministic sampler using a DDPM-trained noise estimator.
+    Implements the non-Markovian reverse process from Song et al. (2021)
+    with eta=0 (fully deterministic) by default.
+    """
+    def __init__(self, schedule: DDPMSchedule, num_steps: int = 10, eta: float = 0.0):
+        self.schedule = schedule
+        self.eta = eta
+        self.timesteps = self._make_subsequence(schedule.T, num_steps)
+
+    @staticmethod
+    def _make_subsequence(T: int, num_steps: int) -> list:
+        """Uniformly spaced subsequence of [0, T-1] in descending order."""
+        step_size = T // num_steps
+        return list(range(T - 1, -1, -step_size))[:num_steps]
+
+    def set_num_steps(self, num_steps: int):
+        """Recompute the timestep subsequence for a new step count."""
+        self.timesteps = self._make_subsequence(self.schedule.T, num_steps)
+
+    def p_sample_step(self, model, o_prev, o_curr, a_tau, tau_idx):
+        """Single DDIM denoising step from timesteps[tau_idx] to timesteps[tau_idx+1] (or to 0)."""
+        t_curr = self.timesteps[tau_idx]
+        batch_size = a_tau.shape[0]
+        device = a_tau.device
+
+        tau = torch.full((batch_size,), t_curr, device=device, dtype=torch.long)
+        eps_hat = model(o_prev, o_curr, a_tau, tau)
+
+        ab_curr = self.schedule.alpha_bar[t_curr]
+
+        # Predict clean action: a0_hat = (a_t - sqrt(1-ab_t) * eps) / sqrt(ab_t)
+        a0_hat = (a_tau - torch.sqrt(1 - ab_curr) * eps_hat) / torch.sqrt(ab_curr)
+
+        if tau_idx + 1 < len(self.timesteps):
+            t_next = self.timesteps[tau_idx + 1]
+            ab_next = self.schedule.alpha_bar[t_next]
+        else:
+            return a0_hat
+
+        # DDIM stochastic coefficient (eta=0 -> deterministic)
+        sigma = self.eta * torch.sqrt((1 - ab_next) / (1 - ab_curr) * (1 - ab_curr / ab_next))
+
+        # Direction pointing toward a_t
+        dir_at = torch.sqrt(1 - ab_next - sigma ** 2) * eps_hat
+
+        a_next = torch.sqrt(ab_next) * a0_hat + dir_at
+        if self.eta > 0:
+            a_next = a_next + sigma * torch.randn_like(a_tau)
+
+        return a_next
+
+    @torch.no_grad()
+    def sample(self, model, o_prev, o_curr, shape, device):
+        """Full DDIM reverse process: noise -> action in len(self.timesteps) model evaluations."""
+        a = torch.randn(shape, device=device)
+        for i in range(len(self.timesteps)):
+            a = self.p_sample_step(model, o_prev, o_curr, a, i)
+        return a
