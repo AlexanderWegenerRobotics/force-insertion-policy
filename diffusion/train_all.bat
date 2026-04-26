@@ -1,4 +1,3 @@
-python -m diffusion.train --config configs/data_config.yaml --hidden_dim 128 --epochs 1500 --batch_size 32768 --save_dir checkpoints/df1
-python -m diffusion.train --config configs/data_config.yaml --hidden_dim 256 --epochs 1500 --batch_size 32768 --save_dir checkpoints/df2
-python -m diffusion.train --config configs/data_config.yaml --hidden_dim 512 --epochs 1500 --batch_size 32768 --save_dir checkpoints/df3
-python -m diffusion.train --config configs/data_config.yaml --hidden_dim 1024 --epochs 1500 --batch_size 32768 --save_dir checkpoints/df4
+python -m diffusion.train --config configs/data_config.yaml --hidden_dim 128  --epochs 1500 --batch_size 32768 --save_dir checkpoints/df1 --early_stopping_patience 30 --early_stopping_min_delta 3e-4
+python -m diffusion.train --config configs/data_config.yaml --hidden_dim 256  --epochs 1500 --batch_size 32768 --save_dir checkpoints/df2 --early_stopping_patience 30 --early_stopping_min_delta 3e-4
+python -m diffusion.train --config configs/data_config.yaml --hidden_dim 1024 --epochs 1500 --batch_size 32768 --save_dir checkpoints/df4 --early_stopping_patience 30 --early_stopping_min_delta 3e-4

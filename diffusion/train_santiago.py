@@ -7,11 +7,45 @@ import time
 from pathlib import Path
 
 from shared.insertion_dataset import InsertionDataset
-from diffusion.ddpm import NoiseEstimator, DDPMSchedule
+from diffusion.ddpm_santiago import build_noise_estimator, DDPMSchedule
+
+MODEL_CHOICES = [
+    "baseline",
+    "simple_mlp",
+    "compact_width",
+    "shallow_backbone",
+    "shared_observation",
+    "fused_observation",
+    "fused_observation_large",
+]
+
+
+def measure_inference_time(model, cfg, device, n_runs=200):
+    """Single-sample forward pass latency in milliseconds (batch_size=1)."""
+    model.eval()
+    obs_dim    = cfg.get("obs_dim", 18)
+    action_dim = cfg.get("action_dim", 6)
+    o_prev  = torch.randn(1, obs_dim,    device=device)
+    o_curr  = torch.randn(1, obs_dim,    device=device)
+    action  = torch.randn(1, action_dim, device=device)
+    tau     = torch.zeros(1, dtype=torch.long, device=device)
+    with torch.no_grad():
+        for _ in range(20):           # warmup
+            model(o_prev, o_curr, action, tau)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        for _ in range(n_runs):
+            model(o_prev, o_curr, action, tau)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    return (time.perf_counter() - t0) / n_runs * 1000
 
 
 def save_run(save_dir, model, cfg, history, n_params, suffix=""):
     save_dir = Path(save_dir)
+    torch.save(model.state_dict(), save_dir / "latest.pt")  # always keep latest
 
     with open(save_dir / "config.json", "w") as f:
         json.dump(cfg, f, indent=2)
@@ -21,6 +55,7 @@ def save_run(save_dir, model, cfg, history, n_params, suffix=""):
 
     arch = {
         "class": model.__class__.__name__,
+        "variant": cfg.get("model", "baseline"),          # added
         "str": str(model),
         "n_params": n_params,
         "obs_dim": cfg.get("obs_dim", 18),
@@ -66,12 +101,25 @@ def train(cfg):
         print(f"GPU memory after data load: {torch.cuda.memory_allocated()/1e9:.2f} GB")
 
     T = cfg.get("diffusion_horizon", 50)
-    model = NoiseEstimator(hidden_dim=cfg.get("hidden_dim", 512)).to(device)
+
+    # changed: model selected by variant name; only pass hidden_dim for baseline
+    model_name = cfg.get("model", "baseline")
+    model_kwargs = {"obs_dim": cfg.get("obs_dim", 18), "action_dim": cfg.get("action_dim", 6)}
+    if model_name == "baseline":
+        model_kwargs["hidden_dim"] = cfg.get("hidden_dim", 512)
+    model = build_noise_estimator(model_name, **model_kwargs).to(device)
+
+    # Infer actual hidden_dim from model for accurate logging
+    if hasattr(model, 'residual_blocks') and len(model.residual_blocks) > 0:
+        cfg['hidden_dim'] = model.residual_blocks[0].net[0].out_features
+    elif hasattr(model, 'net'):
+        cfg['hidden_dim'] = model.net[0].out_features
+
     schedule = DDPMSchedule(T=T).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.get("lr", 1e-3))
 
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model params: {n_params:,} | hidden_dim: {cfg.get('hidden_dim', 512)} | T: {T}")
+    print(f"Model: {model_name} | Params: {n_params:,} | T: {T}")
 
     epochs = cfg.get("epochs", 1500)
     best_val_loss = float("inf")
@@ -81,11 +129,12 @@ def train(cfg):
     min_delta = cfg.get("early_stopping_min_delta", 3e-4)
     epochs_without_improvement = 0
 
-    save_dir = Path(cfg.get("save_dir", "checkpoints"))
+    save_dir = Path(cfg.get("save_dir", f"checkpoints/{model_name}"))
     save_dir.mkdir(exist_ok=True, parents=True)
     val_every = cfg.get("val_every", 5)
 
     history = {
+        "model": model_name,                              # added
         "train_loss": [],
         "val_loss": [],
         "val_epochs": [],
@@ -212,19 +261,24 @@ def train(cfg):
     history["final_train_loss"] = history["train_loss"][-1] if history["train_loss"] else None
 
     torch.save(model.state_dict(), save_dir / "final.pt")
-    save_run(save_dir, model, cfg, history, n_params)
 
+    inference_ms = measure_inference_time(model, cfg, device)
+    history["inference_time_ms"] = round(inference_ms, 4)
+    print(f"Inference time (single sample): {inference_ms:.4f} ms")
+
+    save_run(save_dir, model, cfg, history, n_params)
     print(f"Done. Best val loss: {best_val_loss:.6f} at epoch {best_epoch}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/data_config.yaml")
+    parser.add_argument("--model", default="baseline", choices=MODEL_CHOICES)
     parser.add_argument("--hidden_dim", type=int, default=512)
     parser.add_argument("--epochs", type=int, default=1500)
     parser.add_argument("--batch_size", type=int, default=4096)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--save_dir", default="checkpoints")
+    parser.add_argument("--save_dir", default=None)   # changed: None so model name is auto-used
     parser.add_argument("--val_every", type=int, default=5)
     parser.add_argument("--early_stopping_patience", type=int, default=30)
     parser.add_argument("--early_stopping_min_delta", type=float, default=3e-4)
