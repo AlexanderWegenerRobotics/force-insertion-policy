@@ -1,13 +1,17 @@
 import argparse
 import csv
 import json
+import os
 from pathlib import Path
 
-import numpy as np
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import torch
+import numpy as np
 import yaml
 
 from cvae.model import ConditionalVAE
+from cvae.plot_evaluation import make_scatter_svg, make_time_series_svg, make_tz_focus_svg
 from shared.insertion_dataset import InsertionDataset
 
 
@@ -73,6 +77,18 @@ def summarize_metrics(name: str, metrics: dict):
         metrics["corr"],
     ):
         print(f"{channel}, {rmse:.6f}, {mae:.6f}, {r2:.4f}, {corr:.4f}")
+
+
+def scalar_metrics(pred: np.ndarray, target: np.ndarray) -> dict:
+    diff = pred - target
+    mse = float(np.mean(diff ** 2))
+    rmse = float(np.sqrt(mse))
+    mae = float(np.mean(np.abs(diff)))
+    return {
+        "mse": mse,
+        "rmse": rmse,
+        "mae": mae,
+    }
 
 
 def save_pointwise_csv(
@@ -156,6 +172,60 @@ def save_channel_csvs(output_dir: Path, target: np.ndarray, posterior_mean: np.n
                 writer.writerow([t, target[t, i], posterior_mean[t, i], prior_mean[t, i], prior_std[t, i]])
 
 
+def save_open_loop_summary(
+    output_path: Path,
+    split: str,
+    checkpoint_dir: Path,
+    train_cfg: dict,
+    num_samples: int,
+    posterior_metrics: dict,
+    prior_zero_metrics: dict,
+    prior_mean_metrics: dict,
+    avg_prior_std: list[float],
+    posterior_scalar: dict,
+    prior_zero_scalar: dict,
+    prior_mean_scalar: dict,
+):
+    summary = {
+        "evaluation_type": "open_loop_cvae",
+        "cvae_tested": True,
+        "split": split,
+        "checkpoint_dir": str(checkpoint_dir),
+        "hidden_dim": train_cfg.get("hidden_dim"),
+        "latent_dim": train_cfg.get("latent_dim"),
+        "num_prior_samples": num_samples,
+        "posterior_metrics": posterior_metrics,
+        "posterior_scalar_metrics": posterior_scalar,
+        "open_loop_zero_latent_metrics": prior_zero_metrics,
+        "open_loop_zero_latent_scalar_metrics": prior_zero_scalar,
+        "open_loop_prior_mean_metrics": prior_mean_metrics,
+        "open_loop_prior_mean_scalar_metrics": prior_mean_scalar,
+        "avg_open_loop_prior_std": avg_prior_std,
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+
+def generate_plots_from_csv(csv_path: Path, output_dir: Path, max_timeseries_points: int, max_scatter_points: int):
+    import csv as csv_module
+
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv_module.DictReader(f))
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    make_time_series_svg(rows, output_dir / "timeseries_all_channels.svg", max_timeseries_points)
+    make_scatter_svg(rows, output_dir / "scatter_prior_vs_target.svg", max_scatter_points)
+    make_tz_focus_svg(rows, output_dir / "tz_focus.svg", max_timeseries_points)
+
+    (output_dir / "README.txt").write_text(
+        "Open-loop CVAE plots generated from pointwise_comparison.csv\n"
+        "timeseries_all_channels.svg: target vs posterior mean vs open-loop prior mean for all channels\n"
+        "scatter_prior_vs_target.svg: open-loop prior mean against target for all channels\n"
+        "tz_focus.svg: detailed Tz signal view in open-loop mode\n",
+        encoding="utf-8",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/data_config.yaml")
@@ -164,6 +234,9 @@ def main():
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--num_prior_samples", type=int, default=8)
     parser.add_argument("--max_export_rows", type=int, default=20000)
+    parser.add_argument("--max_timeseries_points", type=int, default=5000)
+    parser.add_argument("--max_scatter_points", type=int, default=20000)
+    parser.add_argument("--skip_plots", action="store_true")
     parser.add_argument("--output_dir", default=None)
     args = parser.parse_args()
 
@@ -205,32 +278,43 @@ def main():
     posterior_metrics = channel_metrics(posterior_mean, target)
     prior_zero_metrics = channel_metrics(prior_zero, target)
     prior_mean_metrics = channel_metrics(prior_mean, target)
+    posterior_scalar = scalar_metrics(posterior_mean, target)
+    prior_zero_scalar = scalar_metrics(prior_zero, target)
+    prior_mean_scalar = scalar_metrics(prior_mean, target)
 
-    summarize_metrics("Posterior reconstruction (upper bound)", posterior_metrics)
-    summarize_metrics("Prior prediction with z=0 (deployable deterministic signal)", prior_zero_metrics)
-    summarize_metrics("Prior prediction mean over samples", prior_mean_metrics)
+    print("\nOpen-loop CVAE evaluation")
+    print(f"split: {args.split}")
+    print(f"checkpoint: {checkpoint_dir}")
+    summarize_metrics("Posterior reconstruction (upper bound, not deployable)", posterior_metrics)
+    summarize_metrics("Open-loop prediction with z=0", prior_zero_metrics)
+    summarize_metrics("Open-loop prediction mean over prior samples", prior_mean_metrics)
+
+    print("\nAggregate scalar metrics")
+    print(f"posterior_rmse={posterior_scalar['rmse']:.6f}, posterior_mae={posterior_scalar['mae']:.6f}")
+    print(f"open_loop_zero_rmse={prior_zero_scalar['rmse']:.6f}, open_loop_zero_mae={prior_zero_scalar['mae']:.6f}")
+    print(f"open_loop_prior_mean_rmse={prior_mean_scalar['rmse']:.6f}, open_loop_prior_mean_mae={prior_mean_scalar['mae']:.6f}")
 
     avg_prior_std = prior_std.mean(axis=0).tolist()
     print("\nAverage prior sample std by channel")
     for channel, std in zip(CHANNEL_NAMES, avg_prior_std):
         print(f"{channel}, {std:.6f}")
 
-    results = {
-        "split": args.split,
-        "checkpoint_dir": str(checkpoint_dir),
-        "hidden_dim": train_cfg.get("hidden_dim"),
-        "latent_dim": train_cfg.get("latent_dim"),
-        "num_prior_samples": args.num_prior_samples,
-        "posterior_metrics": posterior_metrics,
-        "prior_zero_metrics": prior_zero_metrics,
-        "prior_mean_metrics": prior_mean_metrics,
-        "avg_prior_std": avg_prior_std,
-    }
-
     output_dir = Path(args.output_dir) if args.output_dir else checkpoint_dir / f"evaluation_{args.split}"
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+    save_open_loop_summary(
+        output_dir / "summary.json",
+        split=args.split,
+        checkpoint_dir=checkpoint_dir,
+        train_cfg=train_cfg,
+        num_samples=args.num_prior_samples,
+        posterior_metrics=posterior_metrics,
+        prior_zero_metrics=prior_zero_metrics,
+        prior_mean_metrics=prior_mean_metrics,
+        avg_prior_std=avg_prior_std,
+        posterior_scalar=posterior_scalar,
+        prior_zero_scalar=prior_zero_scalar,
+        prior_mean_scalar=prior_mean_scalar,
+    )
 
     save_metrics_csv(
         output_dir / "metrics_by_channel.csv",
@@ -259,13 +343,23 @@ def main():
 
     with open(output_dir / "readme.txt", "w", encoding="utf-8") as f:
         f.write(
-            "posterior_mean uses the true action through the encoder and is an upper bound.\n"
-            "prior_mean and prior_std come from sampling z ~ N(0, I), which reflects inference-time uncertainty.\n"
-            "prior_zero is summarized in summary.json and corresponds to decoding with z = 0.\n"
+            "This folder contains open-loop CVAE evaluation results.\n"
+            "posterior_mean uses the true action through the encoder and is an upper bound, not a deployable open-loop signal.\n"
+            "prior_mean and prior_std come from sampling z ~ N(0, I), which is the open-loop CVAE prediction with uncertainty.\n"
+            "prior_zero corresponds to decoding with z = 0 and is another deterministic open-loop baseline.\n"
             f"pointwise_comparison.csv contains the first {min(len(target), args.max_export_rows)} rows only.\n"
             "metrics_by_channel.csv contains one row per action channel.\n"
             "channels/*.csv contains per-channel timestep data.\n"
         )
+
+    if not args.skip_plots:
+        generate_plots_from_csv(
+            output_dir / "pointwise_comparison.csv",
+            output_dir / "plots",
+            max_timeseries_points=args.max_timeseries_points,
+            max_scatter_points=args.max_scatter_points,
+        )
+        print(f"\nSaved signal plots to: {output_dir / 'plots'}")
 
 
 if __name__ == "__main__":

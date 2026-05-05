@@ -71,9 +71,9 @@ def make_time_series_svg(rows, output_path: Path, max_points: int):
     panel_h = 220
     margin = 70
     height = margin + panel_h * len(CHANNELS) + 40
-    lines = svg_header(width, height, "CVAE vs Collected Data Time Series")
+    lines = svg_header(width, height, "Open-Loop CVAE vs Collected Data Time Series")
 
-    write_text(lines, width / 2, 34, "CVAE vs Collected Data: Time-Series Comparison", size=24, anchor="middle", weight="bold")
+    write_text(lines, width / 2, 34, "Open-Loop CVAE vs Collected Data: Time-Series Comparison", size=24, anchor="middle", weight="bold")
 
     for idx, channel in enumerate(CHANNELS):
         x = 90
@@ -140,8 +140,8 @@ def make_scatter_svg(rows, output_path: Path, max_points: int):
     sampled = sample_rows(rows, max_points)
     width = 1500
     height = 980
-    lines = svg_header(width, height, "Prior Mean vs Target")
-    write_text(lines, width / 2, 34, "Prior Mean vs Target", size=24, anchor="middle", weight="bold")
+    lines = svg_header(width, height, "Open-Loop CVAE Prior Mean vs Target")
+    write_text(lines, width / 2, 34, "Open-Loop CVAE Prior Mean vs Target", size=24, anchor="middle", weight="bold")
 
     cols = 3
     panel_w = 420
@@ -186,8 +186,8 @@ def make_tz_focus_svg(rows, output_path: Path, max_points: int):
     sampled = sample_rows(rows, max_points)
     width = 1500
     height = 900
-    lines = svg_header(width, height, "Tz Focus")
-    write_text(lines, width / 2, 34, "Tz Focus", size=24, anchor="middle", weight="bold")
+    lines = svg_header(width, height, "Open-Loop CVAE Tz Focus")
+    write_text(lines, width / 2, 34, "Open-Loop CVAE Tz Focus", size=24, anchor="middle", weight="bold")
 
     x = 90
     y = 80
