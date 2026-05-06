@@ -153,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", default="checkpoints")
     args = parser.parse_args()
 
-    with open(args.config, "r") as f:
+    with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     cfg.update({k: v for k, v in vars(args).items() if k != "config" and v is not None})
