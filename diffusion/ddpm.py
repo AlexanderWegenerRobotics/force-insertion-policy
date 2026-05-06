@@ -10,9 +10,7 @@ class SinusoidalEmbedding(nn.Module):
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
         half = self.dim // 2
-        freqs = torch.exp(
-            -np.log(10000) * torch.arange(half, device=t.device, dtype=torch.float32) / half
-        )
+        freqs = torch.exp(-np.log(10000) * torch.arange(half, device=t.device, dtype=torch.float32) / half)
         args = t[:, None].float() * freqs[None, :]
         return torch.cat([args.sin(), args.cos()], dim=-1)
 

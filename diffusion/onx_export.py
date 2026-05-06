@@ -1,8 +1,8 @@
 import torch
 from ddpm import NoiseEstimator
 
-model = NoiseEstimator(hidden_dim=512)
-model.load_state_dict(torch.load("archive/tacDiffusionBase/df3/best.pt", map_location="cpu"))
+model = NoiseEstimator(hidden_dim=1024)
+model.load_state_dict(torch.load("archive/tacDiffusionBase/df4/best.pt", map_location="cpu"))
 model.eval()
 
 # Dummy inputs matching the forward signature
@@ -14,7 +14,7 @@ tau          = torch.tensor([25])
 torch.onnx.export(
     model,
     (obs_prev, obs_curr, action_noisy, tau),
-    "noise_estimator.onnx",
+    "df4_best.onnx",
     input_names=["obs_prev", "obs_curr", "action_noisy", "tau"],
     output_names=["eps_hat"],
     dynamic_axes={"obs_prev": {0: "batch"}, "obs_curr": {0: "batch"},
